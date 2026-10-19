@@ -191,10 +191,12 @@ export class ApiClient {
 		}
 
 		const timeoutMs = config?.timeout ?? this.timeout;
+		let timer: ReturnType<typeof setTimeout> | undefined;
 
 		const doFetch = async (): Promise<Response> => {
+			clearTimeout(timer);
 			const controller = new AbortController();
-			const timer = setTimeout(() => controller.abort(), timeoutMs);
+			timer = setTimeout(() => controller.abort(), timeoutMs);
 			try {
 				return await fetch(fullUrl, {
 					method,
@@ -202,24 +204,29 @@ export class ApiClient {
 					body,
 					signal: controller.signal,
 				});
-			} finally {
+			} catch (err) {
 				clearTimeout(timer);
+				throw err;
 			}
 		};
 
-		const response = await fetchWithRetry(doFetch);
+		try {
+			const response = await fetchWithRetry(doFetch);
 
-		if (!response.ok) {
-			throw new FetchHttpError(
-				`Request failed with status ${response.status}`,
-				{
-					data: await parseBody(response),
-					status: response.status,
-					config: { url: fullUrl, method },
-				}
-			);
+			if (!response.ok) {
+				throw new FetchHttpError(
+					`Request failed with status ${response.status}`,
+					{
+						data: await parseBody(response),
+						status: response.status,
+						config: { url: fullUrl, method },
+					}
+				);
+			}
+
+			return (await parseBody(response)) as T;
+		} finally {
+			clearTimeout(timer);
 		}
-
-		return (await parseBody(response)) as T;
 	}
 }
